@@ -13,7 +13,7 @@ build-and-test:
 name: Build and Run Tests
 runs-on: macos-latest
 
-```
+
 env:
   PROJECT: Async-Image-Loading.xcodeproj
   SCHEME: Async-Image-Loading
@@ -42,4 +42,4 @@ steps:
       -project "$PROJECT" \
       -scheme "$SCHEME" \
       -destination "$DESTINATION"
-```
+
