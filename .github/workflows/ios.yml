@@ -37,13 +37,13 @@ jobs:
       # This handles projects nested inside subfolders — which is common.
       - name: Verify project file exists
         run: |
-          PROJECT_PATH=$(find . -name "Async-Image-Loading.xcodeproj" \
+          PROJECT_PATH=$(find . -name "Async Image Loading.xcodeproj" \
             -not -path "*/.git/*" \
             -not -path "*/DerivedData/*" \
             | head -1)
 
           if [ -z "$PROJECT_PATH" ]; then
-            echo "❌ ERROR: Async-Image-Loading.xcodeproj not found anywhere in the repo."
+            echo "❌ ERROR: Async Image Loading.xcodeproj not found anywhere in the repo."
             echo ""
             echo "   All .xcodeproj files found in this repo:"
             find . -name "*.xcodeproj" -not -path "*/.git/*" || echo "   (none found)"
@@ -89,13 +89,13 @@ jobs:
       #    is at root OR inside a subfolder like /MyApp/MyApp.xcodeproj
       - name: Locate Xcode project
         run: |
-          PROJECT_PATH=$(find . -name "Async-Image-Loading.xcodeproj" \
+          PROJECT_PATH=$(find . -name "Async Image Loading.xcodeproj" \
             -not -path "*/.git/*" \
             -not -path "*/DerivedData/*" \
             | head -1)
 
           if [ -z "$PROJECT_PATH" ]; then
-            echo "❌ Could not locate Async-Image-Loading.xcodeproj"
+            echo "❌ Could not locate Async Image Loading.xcodeproj"
             exit 1
           fi
 
@@ -140,7 +140,7 @@ jobs:
         run: |
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT_PATH" \
-            -scheme "Async-Image-Loading" \
+            -scheme "Async Image Loading" \
           && echo "✅ Dependencies resolved." \
           || echo "ℹ️  No package dependencies to resolve."
 
@@ -153,7 +153,7 @@ jobs:
 
           xcodebuild build \
             -project "$PROJECT_PATH" \
-            -scheme "Async-Image-Loading" \
+            -scheme "Async Image Loading" \
             -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
@@ -193,7 +193,7 @@ jobs:
 
           xcodebuild test \
             -project "$PROJECT_PATH" \
-            -scheme "Async-Image-Loading" \
+            -scheme "Async Image Loading" \
             -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
             -configuration Debug \
             -resultBundlePath "${{ github.workspace }}/TestResults.xcresult" \
@@ -237,7 +237,7 @@ jobs:
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Project**      | \`$PROJECT_PATH\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Scheme**       | Async-Image-Loading |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Scheme**       | Async Image Loading |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch**       | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Triggered by** | \`${{ github.actor }}\` via \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit**       | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
