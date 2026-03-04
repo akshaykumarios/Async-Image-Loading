@@ -1,0 +1,43 @@
+name: iOS CI
+
+on:
+push:
+branches: ["main"]
+pull_request:
+branches: ["main"]
+
+jobs:
+build-and-test:
+name: Build and Run Tests
+runs-on: macos-latest
+
+```
+env:
+  PROJECT: Async-Image-Loading.xcodeproj
+  SCHEME: Async-Image-Loading
+  DESTINATION: 'platform=iOS Simulator,name=iPhone 15,OS=latest'
+
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v4
+
+  - name: Show Xcode Version
+    run: xcodebuild -version
+
+  - name: List Project Schemes
+    run: xcodebuild -list -project $PROJECT
+
+  - name: Build App
+    run: |
+      xcodebuild clean build \
+      -project $PROJECT \
+      -scheme $SCHEME \
+      -destination "$DESTINATION"
+
+  - name: Run Unit Tests
+    run: |
+      xcodebuild test \
+      -project $PROJECT \
+      -scheme $SCHEME \
+      -destination "$DESTINATION"
+```
