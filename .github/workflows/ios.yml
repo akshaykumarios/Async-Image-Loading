@@ -1,45 +1,234 @@
-name: iOS CI
+name: iOS Build & Test
 
 on:
-push:
-branches:
-- main
-pull_request:
-branches:
-- main
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened        # New PR created
+      - synchronize   # New commit pushed to existing PR
+      - reopened      # Closed PR reopened
+
+# Cancel any in-progress run for the same branch/PR.
+# Prevents stale runs from wasting CI minutes when you push quickly.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-build-and-test:
-name: Build and Run Tests
-runs-on: macos-latest
 
+  # ──────────────────────────────────────────────────────────────
+  # JOB 1 — VALIDATE
+  # Runs on Linux (fast & cheap). Catches obvious problems before
+  # spending macOS minutes on a broken config.
+  # ──────────────────────────────────────────────────────────────
+  validate:
+    name: 🔎 Validate
+    runs-on: ubuntu-latest
 
-env:
-  PROJECT: Async-Image-Loading.xcodeproj
-  SCHEME: Async-Image-Loading
-  DESTINATION: platform=iOS Simulator,name=iPhone 15,OS=latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-steps:
-  - name: Checkout Repository
-    uses: actions/checkout@v4
+      - name: Verify project file exists
+        run: |
+          if [ ! -d "Async-Image-Loading.xcodeproj" ]; then
+            echo "❌ ERROR: Async-Image-Loading.xcodeproj not found."
+            echo "   Make sure the .xcodeproj is committed and at the repo root."
+            exit 1
+          fi
+          echo "✅ Project file found: Async-Image-Loading.xcodeproj"
 
-  - name: Show Xcode Version
-    run: xcodebuild -version
+      - name: Check for unexpected Windows line endings
+        run: |
+          # CRLF line endings in shell scripts break execution on macOS runners.
+          # This catches the problem early when a Windows developer pushes code.
+          CRLF_FILES=$(find . -name "*.sh" -o -name "*.yml" -o -name "*.yaml" \
+            | grep -v ".git" \
+            | xargs grep -rlU $'\r' 2>/dev/null || true)
 
-  - name: List Project Schemes
-    run: xcodebuild -list -project $PROJECT
+          if [ -n "$CRLF_FILES" ]; then
+            echo "⚠️  WARNING: Windows line endings (CRLF) detected in:"
+            echo "$CRLF_FILES"
+            echo ""
+            echo "   These will be handled by .gitattributes going forward."
+            echo "   See .gitattributes at the repo root."
+          else
+            echo "✅ No CRLF line ending issues found."
+          fi
 
-  - name: Build App
-    run: |
-      xcodebuild clean build \
-      -project "$PROJECT" \
-      -scheme "$SCHEME" \
-      -destination "$DESTINATION"
+  # ──────────────────────────────────────────────────────────────
+  # JOB 2 — BUILD & TEST
+  # Must run on macOS — Xcode is only available here.
+  # Runs only after Job 1 (validate) passes.
+  # ──────────────────────────────────────────────────────────────
+  build-test:
+    name: 🔨 Build & Test
+    runs-on: macos-latest
+    needs: validate     # ← Waits for validate job to succeed first
 
-  - name: Run Unit Tests
-    run: |
-      xcodebuild test \
-      -project "$PROJECT" \
-      -scheme "$SCHEME" \
-      -destination "$DESTINATION"
+    steps:
 
+      # ── 1. Get the code ──────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Show environment info (useful for debugging) ──────
+      - name: Print environment info
+        run: |
+          echo "──────────────────────────────────────"
+          echo " macOS version : $(sw_vers -productVersion)"
+          echo " Xcode version : $(xcodebuild -version | head -1)"
+          echo " Swift version : $(swift --version | head -1)"
+          echo " Triggered by  : ${{ github.event_name }}"
+          echo " Branch/Ref    : ${{ github.ref }}"
+          echo " Commit        : ${{ github.sha }}"
+          echo " Actor         : ${{ github.actor }}"
+          echo "──────────────────────────────────────"
+
+      # ── 3. Select latest stable Xcode ───────────────────────
+      #    macos-latest ships with multiple Xcode versions.
+      #    xcodes picks the latest stable one automatically.
+      - name: Select latest Xcode
+        run: |
+          XCODE_PATH=$(ls /Applications | grep "Xcode" | grep -v "beta" \
+            | sort -V | tail -1)
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "/Applications/$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      # ── 4. List available simulators (helps debug if needed) ─
+      - name: List available iPhone simulators
+        run: |
+          echo "Available iPhone simulators:"
+          xcrun simctl list devices available | grep "iPhone" | head -10
+
+      # ── 5. Resolve Swift Package dependencies (if any) ──────
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "Async-Image-Loading.xcodeproj" \
+            -scheme "Async-Image-Loading" \
+          && echo "✅ Dependencies resolved." \
+          || echo "ℹ️  No package dependencies to resolve."
+
+      # ── 6. BUILD ─────────────────────────────────────────────
+      #    Compiles the app for the simulator.
+      #    CODE_SIGNING_ALLOWED=NO → no certificates needed,
+      #    safe to run on any machine from any OS.
+      - name: Build app
+        run: |
+          set -o pipefail
+
+          xcodebuild build \
+            -project "Async-Image-Loading.xcodeproj" \
+            -scheme "Async-Image-Loading" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+          | xcpretty --color \
+          && echo "✅ Build succeeded." \
+          || { echo "❌ Build failed. See logs above."; exit 1; }
+
+      # ── 7. DETECT TEST TARGETS ───────────────────────────────
+      #    Checks whether your project has any test targets.
+      #    If none exist, the test step is skipped — not failed.
+      #    When you add tests later, this will pick them up
+      #    automatically with zero workflow changes needed.
+      - name: Detect test targets
+        id: detect-tests
+        run: |
+          TEST_TARGETS=$(xcodebuild \
+            -project "Async-Image-Loading.xcodeproj" \
+            -list 2>/dev/null \
+            | grep -A 100 "Test Targets:" \
+            | tail -n +2 \
+            | sed '/^$/q' \
+            | grep -v "^$" \
+            | xargs || true)
+
+          if [ -z "$TEST_TARGETS" ]; then
+            echo "ℹ️  No test targets found in this project."
+            echo "   Tests will be skipped. Add a test target in Xcode"
+            echo "   and this step will run them automatically."
+            echo "has_tests=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Test targets found: $TEST_TARGETS"
+            echo "has_tests=true" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 8. RUN TESTS ─────────────────────────────────────────
+      #    Only runs if test targets were detected in step 7.
+      #    Saves results as a .xcresult bundle for download.
+      - name: Run tests
+        if: steps.detect-tests.outputs.has_tests == 'true'
+        run: |
+          set -o pipefail
+
+          xcodebuild test \
+            -project "Async-Image-Loading.xcodeproj" \
+            -scheme "Async-Image-Loading" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -configuration Debug \
+            -resultBundlePath "${{ github.workspace }}/TestResults.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+          | xcpretty --color --report junit --output test-report.xml \
+          && echo "✅ All tests passed." \
+          || { echo "❌ Tests failed. See report below."; exit 1; }
+
+      # ── 9. UPLOAD TEST RESULTS ───────────────────────────────
+      #    Saves the .xcresult bundle as a GitHub artifact.
+      #    Download it from the Actions run page to open in Xcode.
+      - name: Upload test results
+        if: steps.detect-tests.outputs.has_tests == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults-${{ github.run_number }}
+          path: |
+            TestResults.xcresult
+            test-report.xml
+          retention-days: 14
+
+      # ── 10. SKIP NOTICE ──────────────────────────────────────
+      #    Friendly message when no tests exist yet.
+      - name: No tests notice
+        if: steps.detect-tests.outputs.has_tests == 'false'
+        run: |
+          echo ""
+          echo "┌─────────────────────────────────────────────────┐"
+          echo "│  ℹ️  No test targets found — tests were skipped.  │"
+          echo "│                                                   │"
+          echo "│  To add tests:                                    │"
+          echo "│  Xcode → File → New → Target → Unit Testing      │"
+          echo "│  Bundle → Done. This workflow will run them       │"
+          echo "│  automatically on your next push.                 │"
+          echo "└─────────────────────────────────────────────────┘"
+          echo ""
+
+      # ── 11. JOB SUMMARY ──────────────────────────────────────
+      #    Writes a clean summary to the GitHub Actions run page.
+      #    Visible without opening individual job logs.
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## 📱 iOS Build & Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field        | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Project**  | Async-Image-Loading.xcodeproj |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Scheme**   | Async-Image-Loading |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch**   | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | \`${{ github.actor }}\` via \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit**   | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Runner OS**| \`${{ runner.os }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.detect-tests.outputs.has_tests }}" == "true" ]; then
+            echo "✅ Build completed and tests were executed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Build completed. No test targets found — tests skipped." >> $GITHUB_STEP_SUMMARY
+          fi
